@@ -1,6 +1,6 @@
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import Response
 
 from queries import create_task, delete_task, get_column, get_task, move_task, update_task
@@ -31,7 +31,8 @@ def _column_on_board(column, board_id: int):
 
 
 @router.post("", status_code=201)
-def create(request: Request, body: dict[str, Any]):
+@router.post("/", status_code=201, include_in_schema=False)
+def create(request: Request, body: dict[str, Any] = Body(...)):
     errors, value = validate_create(body)
     if errors:
         raise HTTPException(status_code=400, detail=errors[0])
@@ -44,7 +45,7 @@ def create(request: Request, body: dict[str, Any]):
 
 
 @router.patch("/{task_id}/move")
-def move(task_id: str, request: Request, body: dict[str, Any]):
+def move(task_id: str, request: Request, body: dict[str, Any] = Body(...)):
     tid = _task_id(task_id)
     conn = _db(request)
     existing = get_task(conn, tid)
@@ -60,7 +61,7 @@ def move(task_id: str, request: Request, body: dict[str, Any]):
 
 
 @router.patch("/{task_id}")
-def update(task_id: str, request: Request, body: dict[str, Any]):
+def update(task_id: str, request: Request, body: dict[str, Any] = Body(...)):
     tid = _task_id(task_id)
     conn = _db(request)
     existing = get_task(conn, tid)

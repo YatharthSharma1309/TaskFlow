@@ -14,7 +14,7 @@ CLIENT_DIST = Path(__file__).resolve().parent.parent / "client" / "dist"
 
 
 def create_app(conn) -> FastAPI:
-    app = FastAPI(title="TaskFlow API")
+    app = FastAPI(title="TaskFlow API", redirect_slashes=False)
     app.state.db = conn
 
     app.add_middleware(

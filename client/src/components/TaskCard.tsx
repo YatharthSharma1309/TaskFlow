@@ -56,8 +56,8 @@ function CardFace({ task, className, style, setNodeRef, dragProps, onEdit }: Fac
       ref={setNodeRef}
       style={style}
       className={`${className} card-priority-${task.priority.toLowerCase()}`}
-      onClick={() => onEdit?.(task)}
       {...dragProps}
+      onClick={() => onEdit?.(task)}
     >
       <div className="card-top">
         <span className={`prio prio-${task.priority.toLowerCase()}`}>
