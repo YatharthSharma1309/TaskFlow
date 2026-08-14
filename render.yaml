@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: taskflow
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health

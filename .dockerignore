@@ -1,0 +1,14 @@
+.venv
+.git
+.pytest_cache
+**/__pycache__
+**/*.pyc
+node_modules
+client/node_modules
+client/dist
+server/data/*.db
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.DS_Store
