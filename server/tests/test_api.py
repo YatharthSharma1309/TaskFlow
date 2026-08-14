@@ -92,6 +92,32 @@ def test_board_title_search_filters_in_sql():
     assert titles == ["Implement checkout flow"]
 
 
+def test_patch_updates_title_and_column_in_one_request():
+    conn, client = setup()
+
+    created = client.post(
+        "/api/tasks",
+        json={"columnId": 1, "title": "Atomic me", "priority": "Low"},
+    )
+    assert created.status_code == 201
+    task_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/api/tasks/{task_id}",
+        json={"title": "Moved and renamed", "columnId": 3},
+    )
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["title"] == "Moved and renamed"
+    assert body["column_id"] == 3
+    assert body["column_name"] == "Done"
+
+    from_db = get_task(conn, task_id)
+    assert from_db["title"] == "Moved and renamed"
+    assert from_db["column_id"] == 3
+    assert from_db["column_name"] == "Done"
+
+
 def test_updating_a_task_with_empty_title_fails():
     _conn, client = setup()
     res = client.patch("/api/tasks/1", json={"title": ""})

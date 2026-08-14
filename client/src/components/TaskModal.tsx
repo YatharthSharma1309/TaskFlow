@@ -1,6 +1,9 @@
-import { useEffect, useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { createTask, deleteTask, updateTask } from '../api';
 import { PRIORITIES, type Column, type Priority, type Task } from '../types';
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 type ModalState =
   | { mode: 'create'; columnId: number }
@@ -15,6 +18,11 @@ type Props = {
 
 export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
   const titleId = useId();
+  const errorId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(
+    document.activeElement instanceof HTMLElement ? document.activeElement : null
+  );
   const isEdit = state.mode === 'edit';
   const [title, setTitle] = useState(isEdit ? state.task.title : '');
   const [description, setDescription] = useState(isEdit ? state.task.description ?? '' : '');
@@ -22,10 +30,42 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
   const [columnId, setColumnId] = useState(isEdit ? state.task.column_id : state.columnId);
   const [saving, setSaving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const titleInvalid = Boolean(localError && !title.trim());
+
+  useEffect(() => {
+    const previous = previousFocusRef.current;
+    return () => {
+      if (previous && document.contains(previous)) previous.focus();
+    };
+  }, []);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const root = dialogRef.current;
+      if (!root) return;
+      const nodes = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (nodes.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey) {
+        if (active === first || !root.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !root.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -84,10 +124,12 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
   return (
     <div className="modal-backdrop" onClick={onClose} role="presentation">
       <div
+        ref={dialogRef}
         className="modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={localError ? errorId : undefined}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="modal-head">
@@ -105,6 +147,7 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
               onChange={(event) => setTitle(event.target.value)}
               maxLength={200}
               placeholder="What needs doing?"
+              aria-invalid={titleInvalid || undefined}
             />
           </label>
           <label className="field">
@@ -135,7 +178,7 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
               </select>
             </label>
           </div>
-          {localError && <p className="form-error">{localError}</p>}
+          {localError && <p className="form-error" id={errorId}>{localError}</p>}
           <div className="modal-actions">
             {isEdit && (
               <button type="button" className="btn btn-danger" onClick={() => void handleDelete()} disabled={saving}>

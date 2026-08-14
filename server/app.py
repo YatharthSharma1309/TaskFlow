@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -39,6 +40,7 @@ def create_app(conn) -> FastAPI:
         message = str(exc)
         if "CHECK constraint failed" in message:
             return JSONResponse({"error": "Title is required"}, status_code=400)
+        print(f"Unhandled {type(exc).__name__}: {exc}", file=sys.stderr)
         return JSONResponse(
             {"error": "Something went wrong. Please try again."},
             status_code=500,
