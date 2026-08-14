@@ -2,6 +2,8 @@
 
 A small Kanban board: one board, three columns, tasks that persist in SQLite.
 
+**Live demo:** [https://taskflow-production-46f1.up.railway.app](https://taskflow-production-46f1.up.railway.app)
+
 **Repository:** [github.com/YatharthSharma1309/TaskFlow](https://github.com/YatharthSharma1309/TaskFlow)
 
 ```
@@ -174,22 +176,24 @@ server/
 - **Stretch goal:** drag-and-drop. Title search is the §2.3 nice-to-have. Column counts are the required SQL query shown in the UI, not a separate feature I spent leftover time on. The column dropdown in the edit dialog is the fallback if drag fails.
 - No auth, no realtime, no multi-user — as specified.
 
-## Deploy (optional)
+## Live demo
 
-The assignment gives priority to a live link. `Dockerfile` + `docker-compose.yml` build the React app and serve it from FastAPI.
+Open [https://taskflow-production-46f1.up.railway.app](https://taskflow-production-46f1.up.railway.app). Health: `GET /api/health`. SQLite on this free host is ephemeral — the board re-seeds when the instance restarts.
+
+Local Docker:
 
 ```bash
 docker compose up --build
 ```
 
-`render.yaml` is included if you want to point Render at this repo (Docker runtime). SQLite on a free host is ephemeral — the board resets when the instance restarts, then re-seeds.
+Then open [http://localhost:3001](http://localhost:3001). `render.yaml` is also in the repo if you prefer Render.
 
 ## If I had more time
 
 - Persist order *within* a column after a drop, not just which column the task landed in
 - Multiple boards and a board switcher
 - A couple of frontend tests around the error banner and the empty-title path
-- A hosted demo with a persistent disk so SQLite survives restarts
+- A persistent disk so the Railway SQLite file survives restarts
 
 ## Time spent
 
