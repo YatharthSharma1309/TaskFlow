@@ -23,6 +23,7 @@ function DraggableCard({ task, onEdit }: { task: Task; onEdit: (task: Task) => v
     id: task.id,
     data: { columnId: task.column_id, task },
   });
+  const { role: _role, ...dragA11y } = attributes;
   const skipClickRef = useRef(false);
 
   useEffect(() => {
@@ -61,7 +62,7 @@ function DraggableCard({ task, onEdit }: { task: Task; onEdit: (task: Task) => v
       className={`card ${isDragging ? 'is-dragging' : ''}`}
       style={style}
       setNodeRef={setNodeRef}
-      dragProps={{ ...attributes, ...listeners }}
+      dragProps={{ ...dragA11y, ...listeners, role: 'group', tabIndex: 0 }}
       onCardClick={handleCardClick}
       onCardKeyDown={handleCardKeyDown}
     />
@@ -86,7 +87,7 @@ function CardFace({ task, className, style, setNodeRef, dragProps, onCardClick, 
       ref={setNodeRef}
       style={style}
       className={className}
-      aria-label={`${task.title}, ${task.priority} priority, created ${formatRelative(task.created_at)}`}
+      aria-label={`${task.title}, ${task.priority} priority. Activate to edit.`}
       {...dragProps}
       onClick={onCardClick}
       onKeyDown={onCardKeyDown}

@@ -26,30 +26,54 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
     document.activeElement instanceof HTMLElement ? document.activeElement : null
   );
   const isEdit = state.mode === 'edit';
-  const [title, setTitle] = useState(isEdit ? state.task.title : '');
-  const [description, setDescription] = useState(isEdit ? state.task.description ?? '' : '');
-  const [priority, setPriority] = useState<Priority>(isEdit ? state.task.priority : 'Medium');
-  const [columnId, setColumnId] = useState(isEdit ? state.task.column_id : state.columnId);
+  const initial = useRef({
+    title: isEdit ? state.task.title : '',
+    description: isEdit ? state.task.description ?? '' : '',
+    priority: (isEdit ? state.task.priority : 'Medium') as Priority,
+    columnId: isEdit ? state.task.column_id : state.columnId,
+  });
+  const [title, setTitle] = useState(initial.current.title);
+  const [description, setDescription] = useState(initial.current.description);
+  const [priority, setPriority] = useState<Priority>(initial.current.priority);
+  const [columnId, setColumnId] = useState(initial.current.columnId);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const titleInvalid = Boolean(localError && !title.trim());
+  const dirty =
+    title !== initial.current.title ||
+    description !== initial.current.description ||
+    priority !== initial.current.priority ||
+    columnId !== initial.current.columnId;
 
   useEffect(() => {
     const previous = previousFocusRef.current;
+    const priorOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     return () => {
+      document.body.style.overflow = priorOverflow;
       if (previous && document.contains(previous)) previous.focus();
     };
   }, []);
 
+  function requestClose() {
+    if (saving) return;
+    if (confirmDelete) {
+      setConfirmDelete(false);
+      return;
+    }
+    if (dirty && !confirmDiscard) {
+      setConfirmDiscard(true);
+      return;
+    }
+    onClose();
+  }
+
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key === 'Escape') {
-        if (confirmDelete) {
-          setConfirmDelete(false);
-          return;
-        }
-        onClose();
+        requestClose();
         return;
       }
       if (event.key !== 'Tab') return;
@@ -76,7 +100,7 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, confirmDelete]);
+  }, [saving, dirty, confirmDelete, confirmDiscard, onClose]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -117,6 +141,7 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
     if (!isEdit) return;
     if (!confirmDelete) {
       setConfirmDelete(true);
+      setConfirmDiscard(false);
       return;
     }
 
@@ -135,7 +160,7 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose} role="presentation">
+    <div className="modal-backdrop" onClick={requestClose} role="presentation">
       <div
         ref={dialogRef}
         className="modal"
@@ -154,7 +179,7 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
               </p>
             ) : null}
           </div>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
+          <button type="button" className="icon-btn" aria-label="Close" onClick={requestClose} disabled={saving}>
             <CloseIcon />
           </button>
         </div>
@@ -171,8 +196,12 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
               maxLength={200}
               placeholder="Issue title"
               aria-invalid={titleInvalid || undefined}
+              aria-describedby={localError ? errorId : undefined}
             />
           </label>
+          {localError ? (
+            <p className="form-error" id={errorId} role="alert">{localError}</p>
+          ) : null}
           <label className="field">
             <span>Description</span>
             <textarea
@@ -201,7 +230,6 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
               </select>
             </label>
           </div>
-          {localError && <p className="form-error" id={errorId}>{localError}</p>}
           <div className="modal-actions">
             {isEdit && (
               confirmDelete ? (
@@ -221,12 +249,26 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
               )
             )}
             <span className="spacer" />
-            <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? 'Saving…' : isEdit ? 'Save' : 'Create'}
-            </button>
+            {confirmDiscard ? (
+              <span className="delete-confirm">
+                Discard changes?
+                <button type="button" className="btn btn-danger" onClick={onClose} disabled={saving}>
+                  Discard
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => setConfirmDiscard(false)} disabled={saving}>
+                  Keep editing
+                </button>
+              </span>
+            ) : (
+              <>
+                <button type="button" className="btn btn-ghost" onClick={requestClose} disabled={saving}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={saving}>
+                  {saving ? 'Saving…' : isEdit ? 'Save' : 'Create'}
+                </button>
+              </>
+            )}
           </div>
         </form>
       </div>

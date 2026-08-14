@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   DndContext,
   DragOverlay,
-  KeyboardSensor,
   PointerSensor,
   closestCorners,
   pointerWithin,
@@ -17,6 +16,7 @@ import { type AuthUser, type Board, type Priority, type Task } from './types';
 import AuthScreen from './components/AuthScreen';
 import BoardView from './components/BoardView';
 import ErrorBanner from './components/ErrorBanner';
+import { LogoMark } from './components/Icons';
 import SiteFooter from './components/SiteFooter';
 import SiteHeader from './components/SiteHeader';
 import TaskCard from './components/TaskCard';
@@ -84,7 +84,8 @@ export default function App() {
       setError(null);
     } catch (err) {
       if (loadId !== loadIdRef.current) return;
-      if (controller.signal.aborted) return;
+      const abortedByUs = controller.signal.aborted;
+      if (abortedByUs) return;
       if (err instanceof Error && err.name === 'AbortError') {
         setError('Request timed out. Please try again.');
         return;
@@ -113,8 +114,7 @@ export default function App() {
   }, [loadBoard, user]);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor)
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
 
   const tasksById = useMemo(() => {
@@ -173,12 +173,13 @@ export default function App() {
     }
   }
 
-  const filtered = priority !== 'all' || Boolean(debouncedSearch);
+  const filtered = priority !== 'all' || Boolean(debouncedSearch.trim());
   const visibleCount = board?.columns.reduce((sum, column) => sum + column.tasks.length, 0) ?? 0;
 
   function clearFilters() {
     setPriority('all');
     setSearch('');
+    setDebouncedSearch('');
   }
 
   const firstColumnId = board?.columns[0]?.id;
@@ -224,9 +225,10 @@ export default function App() {
       <div className="app">
         <header className="site-header">
           <div className="site-header-inner">
-            <span className="brand">
+            <a className="brand" href="/" aria-label="TaskFlow home">
+              <LogoMark size={28} />
               <span className="brand-name">TaskFlow</span>
-            </span>
+            </a>
           </div>
         </header>
         <main className="board-wrap">
@@ -256,7 +258,7 @@ export default function App() {
         email={user.email}
         onLogout={() => void handleLogout()}
         onNewTask={
-          firstColumnId != null
+          modal == null && firstColumnId != null
             ? () => setModal({ mode: 'create', columnId: firstColumnId })
             : undefined
         }
@@ -269,10 +271,9 @@ export default function App() {
           filtered={filtered}
           onClearFilters={clearFilters}
         />
-        {loading && board ? (
-          <p className="result-meta" aria-live="polite">Updating…</p>
-        ) : filtered && board ? (
+        {filtered && board ? (
           <p className="result-meta" aria-live="polite">
+            {loading ? 'Updating… · ' : ''}
             {visibleCount === 1 ? '1 task matches' : `${visibleCount} tasks match`}
             {priority !== 'all' ? ` · ${priority}` : ''}
             {debouncedSearch.trim() ? ` · “${debouncedSearch.trim()}”` : ''}
@@ -280,7 +281,13 @@ export default function App() {
         ) : null}
       </div>
 
-      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} onRetry={() => void loadBoard()} />}
+      {error && (
+        <ErrorBanner
+          message={error}
+          onDismiss={() => setError(null)}
+          onRetry={user.board_id ? () => void loadBoard() : undefined}
+        />
+      )}
 
       <main className="board-wrap">
         {loading && !board ? (
@@ -308,7 +315,7 @@ export default function App() {
             </DragOverlay>
           </DndContext>
         ) : (
-          <p className="status">The board could not be loaded.</p>
+          <p className="status">{error ?? 'The board could not be loaded.'}</p>
         )}
       </main>
 
@@ -316,6 +323,7 @@ export default function App() {
 
       {modal && board && (
         <TaskModal
+          key={modal.mode === 'edit' ? `edit-${modal.task.id}` : `create-${modal.columnId}`}
           state={modal}
           columns={board.columns}
           onClose={() => setModal(null)}

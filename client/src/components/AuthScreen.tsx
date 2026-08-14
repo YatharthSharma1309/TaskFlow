@@ -26,7 +26,7 @@ export default function AuthScreen({ onAuthed }: Props) {
       const user = isRegister ? await register(email, password) : await login(email, password);
       onAuthed(user);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not sign in');
+      setError(err instanceof Error ? err.message : isRegister ? 'Could not create account' : 'Could not sign in');
     } finally {
       setSaving(false);
     }
@@ -57,7 +57,7 @@ export default function AuthScreen({ onAuthed }: Props) {
               : 'Open your launch board. Reviewers can use the demo account below.'}
           </p>
 
-          {error ? <p className="form-error" role="alert">{error}</p> : null}
+          {error ? <p className="form-error" id="auth-form-error" role="alert">{error}</p> : null}
 
           <label className="field" htmlFor="auth-email">
             Email
@@ -84,6 +84,8 @@ export default function AuthScreen({ onAuthed }: Props) {
               onChange={(event) => setPassword(event.target.value)}
               minLength={isRegister ? 8 : undefined}
               required
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? 'auth-form-error' : undefined}
             />
           </label>
 

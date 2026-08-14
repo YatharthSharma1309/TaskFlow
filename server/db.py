@@ -65,8 +65,17 @@ def create_postgres(url: str) -> Database:
     import psycopg
     from psycopg.rows import dict_row
 
-    raw = psycopg.connect(url, row_factory=dict_row)
-    conn = Database(raw, "postgres")
+    def open_conn():
+        return psycopg.connect(
+            url,
+            row_factory=dict_row,
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=3,
+        )
+
+    conn = Database(open_conn(), "postgres", reconnect=open_conn)
     _run_statements(conn, POSTGRES_SCHEMA_PATH.read_text(encoding="utf-8"))
     seed(conn)
     purge_expired_sessions(conn)

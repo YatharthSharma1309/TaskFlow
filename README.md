@@ -2,8 +2,6 @@
 
 TaskFlow is a lightweight board for shipping a launch — one board, three columns, tasks that persist in SQLite.
 
-**Live demo:** [https://taskflow-production-46f1.up.railway.app](https://taskflow-production-46f1.up.railway.app)
-
 **Repository:** [github.com/YatharthSharma1309/TaskFlow](https://github.com/YatharthSharma1309/TaskFlow)
 
 ```
@@ -39,7 +37,7 @@ cd server
 uvicorn main:app --reload --port 3001
 ```
 
-The first start creates `server/data/taskflow.db` (SQLite) and seeds a demo account (`demo@taskflow.app` / `demo1234`) with a sample board. If `DATABASE_URL` is set (Neon), that database is used instead.
+The first start creates `server/data/taskflow.db` (SQLite) and seeds a demo account (`demo@taskflow.app` / `demo1234`) with a sample board. That is the assignment default. If `DATABASE_URL` is set, the same app talks to Postgres instead.
 
 ### 2. Frontend
 
@@ -170,8 +168,8 @@ Board load with filters (`?priority=` and `?q=`) uses the same idea: `WHERE` cla
 ```
 client/                 React + Vite (TypeScript)
 server/
-  schema.sql            SQLite schema (local / tests)
-  schema.postgres.sql   Neon / Postgres schema (production)
+  schema.sql            SQLite schema (local / tests / assignment default)
+  schema.postgres.sql   Postgres schema (only if DATABASE_URL is set)
   queries.py            all SQL
   routers/              HTTP handlers
   tests/                pytest
@@ -182,14 +180,14 @@ server/
 - **One board per account.** There is no board CRUD or switcher — register creates Ready / In Progress / Done, and the demo account is pre-seeded with launch tasks.
 - **Status is the column.** There is no separate status field — `column_id` is the source of truth, and the column name is what you see in the UI.
 - **Priority defaults to Medium** when omitted on create.
-- **Python + handwritten SQL**, no ORM. Locally that is stdlib `sqlite3` (`server/schema.sql`). In production, set `DATABASE_URL` to the Neon Postgres database so accounts survive Railway restarts. The same queries in `queries.py` run on both; only placeholders and `RETURNING id` change.
-- **Passwords** are `pbkdf2_hmac` in the standard library; sessions are random tokens in the database, sent as an httpOnly cookie (`Secure` on Railway). No JWT package.
+- **Python + handwritten SQL**, no ORM. The assignment path is stdlib `sqlite3` (`server/schema.sql`). The same queries in `queries.py` also run on Postgres when `DATABASE_URL` is set; only placeholders and `RETURNING id` change.
+- **Passwords** are `pbkdf2_hmac` in the standard library; sessions are random tokens in the database, sent as an httpOnly cookie (`Secure` over HTTPS). No JWT package.
 - **Stretch goal:** drag-and-drop. Title search is the §2.3 nice-to-have. Column counts are the required SQL query shown in the UI, not a separate feature I spent leftover time on. The column dropdown in the edit dialog is the fallback if drag fails.
 - No realtime, no file uploads, no password reset.
 
-## Live demo
+## Hosted demo
 
-Open [https://taskflow-production-46f1.up.railway.app](https://taskflow-production-46f1.up.railway.app). Health: `GET /api/health`. Sign in with `demo@taskflow.app` / `demo1234`. Production uses Neon Postgres (`DATABASE_URL`) so registered accounts survive restarts. The live URL still needs a redeploy after this change.
+A hosted copy is at [https://taskflow-production-46f1.up.railway.app](https://taskflow-production-46f1.up.railway.app) (`GET /api/health`, demo login above). Review the GitHub repo for the current code; run it locally or with Docker to match this README.
 
 Local Docker:
 

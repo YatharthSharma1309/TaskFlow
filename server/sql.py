@@ -1,6 +1,6 @@
 """Tiny DB wrapper so queries.py can stay on `?` placeholders.
 
-SQLite is the local/test default. Postgres (Neon) is used when DATABASE_URL is set.
+SQLite is the local/test default. Postgres is used when DATABASE_URL is set.
 """
 
 from __future__ import annotations
@@ -25,45 +25,75 @@ def unique_errors() -> tuple[type[Exception], ...]:
     return tuple(errors)
 
 
+def _is_disconnect(exc: BaseException) -> bool:
+    name = type(exc).__name__
+    if name in {"OperationalError", "InterfaceError"}:
+        return True
+    message = str(exc).lower()
+    return "ssl connection has been closed" in message or "connection is closed" in message or "server closed" in message
+
+
 class Database:
-    def __init__(self, inner, dialect: str):
+    def __init__(self, inner, dialect: str, reconnect=None):
         self._inner = inner
         self.dialect = dialect
+        self._reconnect = reconnect
         self._lock = threading.Lock()
 
     def execute(self, sql, params=()):
-        with self._lock:
-            return self._inner.execute(self._prep(sql), params)
+        return self._call(lambda conn: conn.execute(self._prep(sql), params))
 
     def executemany(self, sql, seq):
-        with self._lock:
+        def run(conn):
             prepared = self._prep(sql)
             if self.dialect == "postgres":
-                with self._inner.cursor() as cur:
+                with conn.cursor() as cur:
                     cur.executemany(prepared, seq)
                     return cur
-            return self._inner.executemany(prepared, seq)
+            return conn.executemany(prepared, seq)
+
+        return self._call(run)
 
     def insert_id(self, sql, params=()):
-        with self._lock:
+        def run(conn):
             if self.dialect == "postgres":
                 prepared = self._prep(sql).rstrip().rstrip(";") + " RETURNING id"
-                row = self._inner.execute(prepared, params).fetchone()
+                row = conn.execute(prepared, params).fetchone()
                 return row["id"]
-            cur = self._inner.execute(sql, params)
+            cur = conn.execute(sql, params)
             return cur.lastrowid
 
+        return self._call(run)
+
     def commit(self):
-        with self._lock:
-            self._inner.commit()
+        self._call(lambda conn: conn.commit())
 
     def rollback(self):
-        with self._lock:
-            self._inner.rollback()
+        try:
+            self._call(lambda conn: conn.rollback())
+        except Exception:
+            pass
 
     def close(self):
         with self._lock:
-            self._inner.close()
+            try:
+                self._inner.close()
+            except Exception:
+                pass
+
+    def _call(self, fn):
+        with self._lock:
+            try:
+                return fn(self._inner)
+            except Exception as exc:
+                if self.dialect != "postgres" or not self._reconnect or not _is_disconnect(exc):
+                    raise
+                try:
+                    self._inner.close()
+                except Exception:
+                    pass
+                self._inner = self._reconnect()
+                return fn(self._inner)
 
     def _prep(self, sql: str) -> str:
         if self.dialect == "postgres":
