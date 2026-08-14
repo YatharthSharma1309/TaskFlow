@@ -49,6 +49,7 @@ export default function App() {
   const abortRef = useRef<AbortController | null>(null);
   const ignoreClicksUntilRef = useRef(0);
   const movingRef = useRef(false);
+  const unfilteredBoardRef = useRef<Board | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(search), SEARCH_DELAY_MS);
@@ -81,6 +82,8 @@ export default function App() {
       );
       if (loadId !== loadIdRef.current) return;
       setBoard(data);
+      const isFiltered = priority !== 'all' || Boolean(debouncedSearch.trim());
+      if (!isFiltered) unfilteredBoardRef.current = data;
       setError(null);
     } catch (err) {
       if (loadId !== loadIdRef.current) return;
@@ -180,6 +183,7 @@ export default function App() {
     setPriority('all');
     setSearch('');
     setDebouncedSearch('');
+    if (unfilteredBoardRef.current) setBoard(unfilteredBoardRef.current);
   }
 
   const firstColumnId = board?.columns[0]?.id;
@@ -214,9 +218,11 @@ export default function App() {
     }
     setUser(null);
     setBoard(null);
+    unfilteredBoardRef.current = null;
     setError(null);
     setModal(null);
     setSearch('');
+    setDebouncedSearch('');
     setPriority('all');
   }
 

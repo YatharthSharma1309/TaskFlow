@@ -56,8 +56,6 @@ def issue_session(conn, user_id: int) -> tuple[str, datetime]:
 
 def _cookie_flags() -> dict:
     secure = os.environ.get("TASKFLOW_SECURE_COOKIES", "").lower() in {"1", "true", "yes"}
-    if os.environ.get("RAILWAY_ENVIRONMENT"):
-        secure = True
     return {
         "httponly": True,
         "samesite": "lax",

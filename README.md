@@ -12,7 +12,7 @@ A task’s **status is the column it sits in** — Ready, In Progress, or Done. 
 
 **Demo login:** `demo@taskflow.app` / `demo1234`
 
-This README is how to run and review the project. Clone the repo and run it locally (or with Docker). A hosted copy at [taskflow-production-46f1.up.railway.app](https://taskflow-production-46f1.up.railway.app) may lag this tree.
+This README is how to run and review the project. Clone the repo and run it locally, or with Docker.
 
 ## Stack
 
