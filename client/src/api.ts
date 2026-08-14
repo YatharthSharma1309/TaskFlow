@@ -1,4 +1,4 @@
-import type { Board, Priority, Task } from './types';
+import type { AuthUser, Board, Priority, Task } from './types';
 
 export class ApiError extends Error {
   status: number;
@@ -16,9 +16,22 @@ type RequestOptions = {
   signal?: AbortSignal;
 };
 
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  onUnauthorized = handler;
+}
+
 function isAbort(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError'
     || error instanceof Error && error.name === 'AbortError';
+}
+
+function requestSignal(signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(10000);
+  if (!signal) return timeout;
+  const combine = AbortSignal.any;
+  return typeof combine === 'function' ? combine([signal, timeout]) : signal;
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -28,7 +41,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       method: options.method ?? 'GET',
       headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
       body: options.body ? JSON.stringify(options.body) : undefined,
-      signal: options.signal ?? AbortSignal.timeout(10000),
+      credentials: 'include',
+      signal: requestSignal(options.signal),
     });
   } catch (error) {
     if (isAbort(error)) throw error;
@@ -39,6 +53,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
+    const isAuthAttempt = path.startsWith('/api/auth/login') || path.startsWith('/api/auth/register');
+    if (response.status === 401 && !isAuthAttempt) {
+      onUnauthorized?.();
+    }
     throw new ApiError(
       typeof payload.error === 'string' ? payload.error : `Request failed (${response.status})`,
       response.status
@@ -46,6 +64,22 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   }
 
   return payload as T;
+}
+
+export function fetchMe(signal?: AbortSignal): Promise<AuthUser> {
+  return request<AuthUser>('/api/auth/me', { signal });
+}
+
+export function login(email: string, password: string): Promise<AuthUser> {
+  return request<AuthUser>('/api/auth/login', { method: 'POST', body: { email, password } });
+}
+
+export function register(email: string, password: string): Promise<AuthUser> {
+  return request<AuthUser>('/api/auth/register', { method: 'POST', body: { email, password } });
+}
+
+export function logout(): Promise<void> {
+  return request<void>('/api/auth/logout', { method: 'POST' });
 }
 
 export function fetchBoard(

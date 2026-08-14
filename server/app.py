@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from routers.auth import router as auth_router
 from routers.boards import router as boards_router
 from routers.tasks import router as tasks_router
 
@@ -37,6 +38,10 @@ def create_app(conn) -> FastAPI:
 
     @app.exception_handler(Exception)
     async def unexpected_error(_request: Request, exc: Exception):
+        if isinstance(exc, StarletteHTTPException):
+            detail = exc.detail
+            message = detail if isinstance(detail, str) else "Request failed"
+            return JSONResponse({"error": message}, status_code=exc.status_code)
         message = str(exc)
         if "CHECK constraint failed" in message:
             return JSONResponse({"error": "Title is required"}, status_code=400)
@@ -50,6 +55,7 @@ def create_app(conn) -> FastAPI:
     def health():
         return {"ok": True}
 
+    app.include_router(auth_router, prefix="/api/auth")
     app.include_router(boards_router, prefix="/api/boards")
     app.include_router(tasks_router, prefix="/api/tasks")
 
@@ -60,6 +66,8 @@ def create_app(conn) -> FastAPI:
     if CLIENT_DIST.is_dir():
         @app.get("/{full_path:path}")
         def spa(full_path: str):
+            if full_path == "api" or full_path.startswith("api/"):
+                raise StarletteHTTPException(status_code=404, detail="Not found")
             candidate = CLIENT_DIST / full_path
             if full_path and candidate.is_file():
                 return FileResponse(candidate)

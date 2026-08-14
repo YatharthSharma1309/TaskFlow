@@ -1,7 +1,7 @@
-from db import create_database, default_db_path
+from db import connect
 from seed import seed
 
-conn = create_database(default_db_path())
+conn = connect()
 seed(conn, reset=True)
 conn.close()
 print("Database re-seeded.")

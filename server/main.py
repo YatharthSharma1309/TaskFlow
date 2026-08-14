@@ -1,5 +1,5 @@
-from db import create_database, default_db_path
+from db import connect
 from app import create_app
 
-db = create_database(default_db_path())
+db = connect()
 app = create_app(db)

@@ -5,3 +5,10 @@ services:
       - "3001:3001"
     environment:
       PORT: "3001"
+      DATABASE_URL: ${DATABASE_URL:-}
+      TASKFLOW_SECURE_COOKIES: ${TASKFLOW_SECURE_COOKIES:-}
+    volumes:
+      - taskflow-data:/app/server/data
+
+volumes:
+  taskflow-data:

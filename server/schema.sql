@@ -1,13 +1,29 @@
 -- TaskFlow schema (SQLite)
--- A Board has Columns; a Column has Tasks.
+-- A user has one Board; a Board has Columns; a Column has Tasks.
 -- Status of a task is the column it currently lives in.
 
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE IF NOT EXISTS users (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  email         TEXT    NOT NULL COLLATE NOCASE UNIQUE,
+  password_hash TEXT    NOT NULL,
+  created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token      TEXT    PRIMARY KEY,
+  user_id    INTEGER NOT NULL,
+  expires_at TEXT    NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS boards (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER UNIQUE,
   name       TEXT    NOT NULL,
-  created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+  created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS columns (
@@ -29,6 +45,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE CASCADE
 );
 
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_columns_board_id ON columns(board_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_column_id ON tasks(column_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_priority_created ON tasks(priority, created_at DESC);

@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from auth import require_board, require_user
 from queries import (
     count_tasks_per_column,
-    get_board,
     list_columns,
     list_tasks_by_priority,
     list_tasks_for_board,
@@ -26,6 +26,37 @@ def _board_id(raw: str) -> int:
     return value
 
 
+@router.get("/{board_id}/task-counts")
+def task_counts(board_id: str, request: Request):
+    user = require_user(request)
+    bid = _board_id(board_id)
+    conn = _db(request)
+    require_board(conn, user, bid)
+    return count_tasks_per_column(conn, bid)
+
+
+@router.get("/{board_id}/tasks")
+def tasks_by_priority(
+    board_id: str,
+    request: Request,
+    priority: str | None = Query(default=None),
+):
+    user = require_user(request)
+    bid = _board_id(board_id)
+    conn = _db(request)
+    require_board(conn, user, bid)
+
+    parsed, err = parse_optional_priority(priority)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    if not parsed:
+        raise HTTPException(
+            status_code=400,
+            detail="priority query param is required (Low, Medium, or High)",
+        )
+    return list_tasks_by_priority(conn, bid, parsed)
+
+
 @router.get("/{board_id}")
 def get_board_payload(
     board_id: str,
@@ -33,11 +64,10 @@ def get_board_payload(
     priority: str | None = Query(default=None),
     q: str | None = Query(default=None),
 ):
+    user = require_user(request)
     bid = _board_id(board_id)
     conn = _db(request)
-    board = get_board(conn, bid)
-    if not board:
-        raise HTTPException(status_code=404, detail="Board not found")
+    board = require_board(conn, user, bid)
 
     parsed, err = parse_optional_priority(priority)
     if err:
@@ -58,34 +88,3 @@ def get_board_payload(
         for column in columns
     ]
     return board
-
-
-@router.get("/{board_id}/task-counts")
-def task_counts(board_id: str, request: Request):
-    bid = _board_id(board_id)
-    conn = _db(request)
-    if not get_board(conn, bid):
-        raise HTTPException(status_code=404, detail="Board not found")
-    return count_tasks_per_column(conn, bid)
-
-
-@router.get("/{board_id}/tasks")
-def tasks_by_priority(
-    board_id: str,
-    request: Request,
-    priority: str | None = Query(default=None),
-):
-    bid = _board_id(board_id)
-    conn = _db(request)
-    if not get_board(conn, bid):
-        raise HTTPException(status_code=404, detail="Board not found")
-
-    parsed, err = parse_optional_priority(priority)
-    if err:
-        raise HTTPException(status_code=400, detail=err)
-    if not parsed:
-        raise HTTPException(
-            status_code=400,
-            detail="priority query param is required (Low, Medium, or High)",
-        )
-    return list_tasks_by_priority(conn, bid, parsed)

@@ -1,53 +1,45 @@
 import type { Priority } from '../types';
 import { PRIORITIES } from '../types';
+import { PriorityMeter } from './Icons';
 
 type Props = {
   priority: Priority | 'all';
-  search: string;
   onPriorityChange: (value: Priority | 'all') => void;
-  onSearchChange: (value: string) => void;
+  filtered?: boolean;
+  onClearFilters?: () => void;
 };
 
-export default function Toolbar({ priority, search, onPriorityChange, onSearchChange }: Props) {
+const FILTERS: Array<{ id: Priority | 'all'; label: string }> = [
+  { id: 'all', label: 'All' },
+  ...PRIORITIES.map((item) => ({ id: item, label: item })),
+];
+
+export default function Toolbar({ priority, onPriorityChange, filtered, onClearFilters }: Props) {
   return (
     <div className="toolbar">
-      <label className="field">
-        <span>Search</span>
-        <div className="search-wrap">
-          <input
-            type="search"
-            placeholder="Filter by title"
-            value={search}
-            onChange={(event) => onSearchChange(event.target.value)}
-          />
-          {search && (
-            <button type="button" className="search-clear" aria-label="Clear search" onClick={() => onSearchChange('')}>
-              ×
-            </button>
-          )}
-        </div>
-      </label>
-      <div className="field">
-        <span>Priority</span>
-        <div className="pills" role="group" aria-label="Filter by priority">
-          <button
-            type="button"
-            className={`pill ${priority === 'all' ? 'is-active' : ''}`}
-            onClick={() => onPriorityChange('all')}
-          >
-            All
-          </button>
-          {PRIORITIES.map((item) => (
+      <div className="priority-field">
+        <span className="toolbar-label" id="priority-filter-label">
+          Priority
+        </span>
+        <div className="pills" role="group" aria-labelledby="priority-filter-label">
+          {FILTERS.map((item) => (
             <button
-              key={item}
+              key={item.id}
               type="button"
-              className={`pill ${priority === item ? 'is-active' : ''}`}
-              onClick={() => onPriorityChange(item)}
+              className={`pill pill-${item.id.toLowerCase()} ${priority === item.id ? 'is-active' : ''}`}
+              aria-pressed={priority === item.id}
+              onClick={() => onPriorityChange(item.id)}
             >
-              {item}
+              <PriorityMeter level={item.id} />
+              {item.label}
             </button>
           ))}
         </div>
+        {filtered && onClearFilters ? (
+          <button type="button" className="filter-clear" onClick={onClearFilters}>
+            Clear filters
+          </button>
+        ) : null}
       </div>
     </div>
   );

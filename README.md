@@ -1,16 +1,18 @@
 # TaskFlow
 
-A small Kanban board: one board, three columns, tasks that persist in SQLite.
+TaskFlow is a lightweight board for shipping a launch — one board, three columns, tasks that persist in SQLite.
 
 **Live demo:** [https://taskflow-production-46f1.up.railway.app](https://taskflow-production-46f1.up.railway.app)
 
 **Repository:** [github.com/YatharthSharma1309/TaskFlow](https://github.com/YatharthSharma1309/TaskFlow)
 
 ```
-Board ──< Column ──< Task
+User ──< Board ──< Column ──< Task
 ```
 
-A task's **status** is the column it currently lives in (`To Do` / `In Progress` / `Done`).
+A task's status is where it sits on the board: **Ready**, **In Progress**, or **Done**. Each account has its own board.
+
+**Demo login:** `demo@taskflow.app` / `demo1234`
 
 ## Run locally
 
@@ -37,7 +39,7 @@ cd server
 uvicorn main:app --reload --port 3001
 ```
 
-The first start creates `server/data/taskflow.db` and seeds a **Product Launch** board.
+The first start creates `server/data/taskflow.db` (SQLite) and seeds a demo account (`demo@taskflow.app` / `demo1234`) with a sample board. If `DATABASE_URL` is set (Neon), that database is used instead.
 
 ### 2. Frontend
 
@@ -50,7 +52,7 @@ npm run dev --prefix client
 
 Open [http://localhost:5173](http://localhost:5173). Vite proxies `/api` to the backend on port 3001.
 
-Creates, edits, moves, and deletes save to SQLite immediately. Reload the page to confirm the data is not just React state.
+Creates, edits, moves, and deletes save immediately. Reload the page to confirm the data is not just React state.
 
 Reset demo data (from the `server` folder):
 
@@ -74,7 +76,7 @@ From the `server` folder:
 ../.venv/bin/python -m pytest
 ```
 
-Covers: empty title rejected, moving a task changes its column, and the two SQL queries against known seed rows.
+Covers: empty title rejected, moving a task changes its column, the two SQL queries against known seed rows, sign-in, and one user not seeing another user's board.
 
 ### One-command (Docker)
 
@@ -86,9 +88,10 @@ Then open [http://localhost:3001](http://localhost:3001).
 
 ## What it does
 
-- View a board with columns and tasks
+- Sign in / create an account (httpOnly session cookie)
+- View your board with columns and tasks
 - Create / edit / delete a task
-- Move a task by **drag-and-drop**, or with the **column dropdown** in the edit dialog
+- Move a task by **drag-and-drop**, or change **status** in the edit dialog
 - Filter by priority (SQL, not a client-side filter of a full dump)
 - Search by title (nice-to-have from §2.3; also SQL)
 - Column headers show task counts from the required `COUNT` + `GROUP BY` query
@@ -101,7 +104,9 @@ See [`server/schema.sql`](server/schema.sql). Short version:
 
 | Table | Keys / constraints |
 | --- | --- |
-| `boards` | `id` PK, `name` NOT NULL |
+| `users` | `id` PK, `email` unique, `password_hash` |
+| `sessions` | `token` PK, `user_id` → `users(id)` |
+| `boards` | `id` PK, `user_id` → `users(id)` (one board per account), `name` NOT NULL |
 | `columns` | `id` PK, `board_id` → `boards(id)`, `name` NOT NULL |
 | `tasks` | `id` PK, `column_id` → `columns(id)`, `title` NOT NULL + non-empty CHECK, `priority` IN (`Low`,`Medium`,`High`), `created_at` NOT NULL |
 
@@ -148,7 +153,11 @@ Board load with filters (`?priority=` and `?q=`) uses the same idea: `WHERE` cla
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| `GET` | `/api/boards/:id` | Optional `priority`, `q` |
+| `POST` | `/api/auth/register` | `{ email, password }` — creates an empty board |
+| `POST` | `/api/auth/login` | `{ email, password }` — httpOnly cookie |
+| `POST` | `/api/auth/logout` | Clears the session |
+| `GET` | `/api/auth/me` | Current user + `board_id` |
+| `GET` | `/api/boards/:id` | Own board only. Optional `priority`, `q` |
 | `GET` | `/api/boards/:id/task-counts` | Query 1 |
 | `GET` | `/api/boards/:id/tasks?priority=` | Query 2 |
 | `POST` | `/api/tasks` | `{ columnId, title, description?, priority? }` |
@@ -161,7 +170,8 @@ Board load with filters (`?priority=` and `?q=`) uses the same idea: `WHERE` cla
 ```
 client/                 React + Vite (TypeScript)
 server/
-  schema.sql            source of truth for the database
+  schema.sql            SQLite schema (local / tests)
+  schema.postgres.sql   Neon / Postgres schema (production)
   queries.py            all SQL
   routers/              HTTP handlers
   tests/                pytest
@@ -169,16 +179,17 @@ server/
 
 ## Decisions & assumptions
 
-- **One board** is enough for the assignment, so there is no board CRUD. A fresh database always gets the seeded Product Launch board.
-- **Status = column.** I did not store a separate `status` string; `column_id` is the source of truth and the column name is what you see.
+- **One board per account.** There is no board CRUD or switcher — register creates Ready / In Progress / Done, and the demo account is pre-seeded with launch tasks.
+- **Status is the column.** There is no separate status field — `column_id` is the source of truth, and the column name is what you see in the UI.
 - **Priority defaults to Medium** when omitted on create.
-- **Python + stdlib `sqlite3`**, with the SQL written by hand rather than an ORM, so the required queries are obvious in `queries.py`. I picked Python over Node for the API because SQLite is in the standard library — a fresh clone does not need a native addon or a C++ toolchain, which is the difference between "works on my machine" and "works after `pip install`".
+- **Python + handwritten SQL**, no ORM. Locally that is stdlib `sqlite3` (`server/schema.sql`). In production, set `DATABASE_URL` to the Neon Postgres database so accounts survive Railway restarts. The same queries in `queries.py` run on both; only placeholders and `RETURNING id` change.
+- **Passwords** are `pbkdf2_hmac` in the standard library; sessions are random tokens in the database, sent as an httpOnly cookie (`Secure` on Railway). No JWT package.
 - **Stretch goal:** drag-and-drop. Title search is the §2.3 nice-to-have. Column counts are the required SQL query shown in the UI, not a separate feature I spent leftover time on. The column dropdown in the edit dialog is the fallback if drag fails.
-- No auth, no realtime, no multi-user — as specified.
+- No realtime, no file uploads, no password reset.
 
 ## Live demo
 
-Open [https://taskflow-production-46f1.up.railway.app](https://taskflow-production-46f1.up.railway.app). Health: `GET /api/health`. SQLite on this free host is ephemeral — the board re-seeds when the instance restarts.
+Open [https://taskflow-production-46f1.up.railway.app](https://taskflow-production-46f1.up.railway.app). Health: `GET /api/health`. Sign in with `demo@taskflow.app` / `demo1234`. Production uses Neon Postgres (`DATABASE_URL`) so registered accounts survive restarts. The live URL still needs a redeploy after this change.
 
 Local Docker:
 
@@ -186,14 +197,13 @@ Local Docker:
 docker compose up --build
 ```
 
-Then open [http://localhost:3001](http://localhost:3001). `render.yaml` is also in the repo if you prefer Render.
+Then open [http://localhost:3001](http://localhost:3001). Compose mounts a volume for SQLite if `DATABASE_URL` is unset. `render.yaml` is also in the repo if you prefer Render.
 
 ## If I had more time
 
 - Persist order *within* a column after a drop, not just which column the task landed in
 - Multiple boards and a board switcher
 - A couple of frontend tests around the error banner and the empty-title path
-- A persistent disk so the Railway SQLite file survives restarts
 
 ## Time spent
 

@@ -1,6 +1,8 @@
 """All database access. The two assignment queries are
 count_tasks_per_column and list_tasks_by_priority."""
 
+from sql import utc_now
+
 
 def _rows(cursor):
     return [dict(row) for row in cursor.fetchall()]
@@ -11,11 +13,76 @@ def _row(cursor):
     return dict(result) if result is not None else None
 
 
+def get_user_by_email(conn, email):
+    return _row(conn.execute(
+        "SELECT id, email, password_hash, created_at FROM users WHERE email = ?",
+        (email,),
+    ))
+
+
+def get_user_by_id(conn, user_id):
+    return _row(conn.execute(
+        "SELECT id, email, created_at FROM users WHERE id = ?",
+        (user_id,),
+    ))
+
+
+def create_user(conn, *, email, password_hash):
+    user_id = conn.insert_id(
+        "INSERT INTO users (email, password_hash) VALUES (?, ?)",
+        (email, password_hash),
+    )
+    conn.commit()
+    return get_user_by_id(conn, user_id)
+
+
+def create_session(conn, token, user_id, expires_at):
+    conn.execute(
+        "INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)",
+        (token, user_id, expires_at),
+    )
+    conn.commit()
+
+
+def delete_session(conn, token):
+    conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+    conn.commit()
+
+
+def get_session_user(conn, token):
+    return _row(conn.execute(
+        """
+        SELECT u.id, u.email, u.created_at
+        FROM sessions s
+        INNER JOIN users u ON u.id = s.user_id
+        WHERE s.token = ?
+          AND s.expires_at > ?
+        """,
+        (token, utc_now()),
+    ))
+
+
 def get_board(conn, board_id):
     return _row(conn.execute(
-        "SELECT id, name, created_at FROM boards WHERE id = ?",
+        "SELECT id, user_id, name, created_at FROM boards WHERE id = ?",
         (board_id,),
     ))
+
+
+def get_board_for_user(conn, user_id):
+    return _row(conn.execute(
+        "SELECT id, user_id, name, created_at FROM boards WHERE user_id = ?",
+        (user_id,),
+    ))
+
+
+def create_board(conn, *, user_id, name):
+    board_id = conn.insert_id(
+        "INSERT INTO boards (user_id, name) VALUES (?, ?)",
+        (user_id, name),
+    )
+    conn.commit()
+    return get_board(conn, board_id)
 
 
 def list_columns(conn, board_id):
@@ -115,9 +182,11 @@ def get_task(conn, task_id):
           t.position,
           t.created_at,
           c.board_id,
-          c.name AS column_name
+          c.name AS column_name,
+          b.user_id
         FROM tasks t
         INNER JOIN columns c ON c.id = t.column_id
+        INNER JOIN boards b ON b.id = c.board_id
         WHERE t.id = ?
         """,
         (task_id,),
@@ -131,13 +200,28 @@ def get_column(conn, column_id):
     ))
 
 
-def create_task(conn, *, column_id, title, description, priority):
-    next_pos = conn.execute(
-        "SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM tasks WHERE column_id = ?",
-        (column_id,),
-    ).fetchone()["next_pos"]
+def _next_position(conn, column_id, exclude_task_id=None):
+    if exclude_task_id is None:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM tasks WHERE column_id = ?",
+            (column_id,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT COALESCE(MAX(position), -1) + 1 AS next_pos
+            FROM tasks
+            WHERE column_id = ? AND id != ?
+            """,
+            (column_id, exclude_task_id),
+        ).fetchone()
+    return row["next_pos"]
 
-    cur = conn.execute(
+
+def create_task(conn, *, column_id, title, description, priority):
+    next_pos = _next_position(conn, column_id)
+
+    task_id = conn.insert_id(
         """
         INSERT INTO tasks (column_id, title, description, priority, position)
         VALUES (?, ?, ?, ?, ?)
@@ -145,11 +229,14 @@ def create_task(conn, *, column_id, title, description, priority):
         (column_id, title, description, priority, next_pos),
     )
     conn.commit()
-    return get_task(conn, cur.lastrowid)
+    return get_task(conn, task_id)
 
 
 def update_task(conn, task_id, fields):
+    existing = get_task(conn, task_id)
     column_id = fields.get("column_id")
+    moving = existing is not None and column_id is not None and column_id != existing["column_id"]
+
     sets = []
     params = []
     for key in ("title", "description", "priority"):
@@ -157,29 +244,30 @@ def update_task(conn, task_id, fields):
             sets.append(f"{key} = ?")
             params.append(fields[key])
 
-    with conn:
+    try:
         if sets:
             params.append(task_id)
             conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", params)
-        if column_id:
-            next_pos = conn.execute(
-                "SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM tasks WHERE column_id = ?",
-                (column_id,),
-            ).fetchone()["next_pos"]
+        if moving:
+            next_pos = _next_position(conn, column_id, exclude_task_id=task_id)
             conn.execute(
                 "UPDATE tasks SET column_id = ?, position = ? WHERE id = ?",
                 (column_id, next_pos, task_id),
             )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
     return get_task(conn, task_id)
 
 
 def move_task(conn, task_id, column_id):
-    next_pos = conn.execute(
-        "SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM tasks WHERE column_id = ?",
-        (column_id,),
-    ).fetchone()["next_pos"]
+    existing = get_task(conn, task_id)
+    if existing and existing["column_id"] == column_id:
+        return existing
 
+    next_pos = _next_position(conn, column_id, exclude_task_id=task_id)
     conn.execute(
         "UPDATE tasks SET column_id = ?, position = ? WHERE id = ?",
         (column_id, next_pos, task_id),

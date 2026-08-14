@@ -1,7 +1,8 @@
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import type { CSSProperties, HTMLAttributes } from 'react';
+import { useEffect, useRef, type CSSProperties, type HTMLAttributes, type KeyboardEvent } from 'react';
 import type { Task } from '../types';
+import { formatFull, formatRelative } from '../dates';
 
 type Props = {
   task: Task;
@@ -22,10 +23,37 @@ function DraggableCard({ task, onEdit }: { task: Task; onEdit: (task: Task) => v
     id: task.id,
     data: { columnId: task.column_id, task },
   });
+  const skipClickRef = useRef(false);
+
+  useEffect(() => {
+    if (isDragging) {
+      skipClickRef.current = true;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      skipClickRef.current = false;
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [isDragging]);
 
   const style: CSSProperties = {
     transform: CSS.Translate.toString(transform),
   };
+
+  function handleCardClick() {
+    if (skipClickRef.current) return;
+    onEdit(task);
+  }
+
+  function handleCardKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.target !== event.currentTarget) return;
+    if (event.repeat) return;
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (skipClickRef.current) return;
+    onEdit(task);
+  }
 
   return (
     <CardFace
@@ -34,7 +62,8 @@ function DraggableCard({ task, onEdit }: { task: Task; onEdit: (task: Task) => v
       style={style}
       setNodeRef={setNodeRef}
       dragProps={{ ...attributes, ...listeners }}
-      onEdit={onEdit}
+      onCardClick={handleCardClick}
+      onCardKeyDown={handleCardKeyDown}
     />
   );
 }
@@ -45,21 +74,26 @@ type FaceProps = {
   style?: CSSProperties;
   setNodeRef?: (node: HTMLElement | null) => void;
   dragProps?: HTMLAttributes<HTMLElement>;
-  onEdit?: (task: Task) => void;
+  onCardClick?: () => void;
+  onCardKeyDown?: (event: KeyboardEvent<HTMLElement>) => void;
 };
 
-function CardFace({ task, className, style, setNodeRef, dragProps, onEdit }: FaceProps) {
+function CardFace({ task, className, style, setNodeRef, dragProps, onCardClick, onCardKeyDown }: FaceProps) {
   const filled = task.priority === 'High' ? 3 : task.priority === 'Medium' ? 2 : 1;
 
   return (
     <article
       ref={setNodeRef}
       style={style}
-      className={`${className} card-priority-${task.priority.toLowerCase()}`}
+      className={className}
+      aria-label={`${task.title}, ${task.priority} priority, created ${formatRelative(task.created_at)}`}
       {...dragProps}
-      onClick={() => onEdit?.(task)}
+      onClick={onCardClick}
+      onKeyDown={onCardKeyDown}
     >
-      <div className="card-top">
+      <h3>{task.title}</h3>
+      {task.description?.trim() ? <p className="card-desc">{task.description}</p> : null}
+      <div className="card-meta">
         <span className={`prio prio-${task.priority.toLowerCase()}`}>
           <span className="prio-bars" aria-hidden="true">
             <i data-on={filled >= 1 || undefined} />
@@ -68,33 +102,10 @@ function CardFace({ task, className, style, setNodeRef, dragProps, onEdit }: Fac
           </span>
           {task.priority}
         </span>
-        {onEdit && (
-          <button
-            type="button"
-            className="card-edit"
-            onClick={(event) => {
-              event.stopPropagation();
-              onEdit(task);
-            }}
-          >
-            Edit
-          </button>
-        )}
+        <time dateTime={task.created_at} title={formatFull(task.created_at)}>
+          {formatRelative(task.created_at)}
+        </time>
       </div>
-      <h3>{task.title}</h3>
-      {task.description?.trim() ? <p className="card-desc">{task.description}</p> : null}
-      <time dateTime={task.created_at}>{formatDate(task.created_at)}</time>
     </article>
   );
-}
-
-function formatDate(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  const sameYear = date.getFullYear() === new Date().getFullYear();
-  return date.toLocaleDateString(undefined, {
-    day: 'numeric',
-    month: 'short',
-    year: sameYear ? undefined : 'numeric',
-  });
 }

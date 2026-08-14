@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { createTask, deleteTask, updateTask } from '../api';
 import { PRIORITIES, type Column, type Priority, type Task } from '../types';
+import { CloseIcon } from './Icons';
+import { formatAbsolute, formatFull } from '../dates';
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -29,6 +31,7 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
   const [priority, setPriority] = useState<Priority>(isEdit ? state.task.priority : 'Medium');
   const [columnId, setColumnId] = useState(isEdit ? state.task.column_id : state.columnId);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const titleInvalid = Boolean(localError && !title.trim());
 
@@ -42,6 +45,10 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key === 'Escape') {
+        if (confirmDelete) {
+          setConfirmDelete(false);
+          return;
+        }
         onClose();
         return;
       }
@@ -69,7 +76,7 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, confirmDelete]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -87,7 +94,7 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
           title: trimmed,
           description,
           priority,
-          columnId,
+          ...(columnId !== state.task.column_id ? { columnId } : {}),
         });
       } else {
         await createTask({
@@ -108,15 +115,21 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
 
   async function handleDelete() {
     if (!isEdit) return;
-    if (!window.confirm(`Delete “${state.task.title}”? This cannot be undone.`)) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
 
     setSaving(true);
+    setLocalError(null);
     try {
       await deleteTask(state.task.id);
       await onSaved();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not delete the task';
       setLocalError(message);
+      setConfirmDelete(false);
+    } finally {
       setSaving(false);
     }
   }
@@ -133,9 +146,16 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
         onClick={(event) => event.stopPropagation()}
       >
         <div className="modal-head">
-          <h2 id={titleId}>{isEdit ? 'Edit task' : 'New task'}</h2>
+          <div>
+            <h2 id={titleId}>{isEdit ? 'Edit task' : 'New task'}</h2>
+            {isEdit ? (
+              <p className="modal-created" title={formatFull(state.task.created_at)}>
+                Created {formatAbsolute(state.task.created_at)}
+              </p>
+            ) : null}
+          </div>
           <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
-            ×
+            <CloseIcon />
           </button>
         </div>
         <form onSubmit={handleSubmit}>
@@ -144,9 +164,12 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
             <input
               autoFocus
               value={title}
-              onChange={(event) => setTitle(event.target.value)}
+              onChange={(event) => {
+                setTitle(event.target.value);
+                if (localError === 'Title is required') setLocalError(null);
+              }}
               maxLength={200}
-              placeholder="What needs doing?"
+              placeholder="Issue title"
               aria-invalid={titleInvalid || undefined}
             />
           </label>
@@ -170,7 +193,7 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
               </select>
             </label>
             <label className="field">
-              <span>Column</span>
+              <span>Status</span>
               <select value={columnId} onChange={(event) => setColumnId(Number(event.target.value))}>
                 {columns.map((column) => (
                   <option key={column.id} value={column.id}>{column.name}</option>
@@ -181,16 +204,28 @@ export default function TaskModal({ state, columns, onClose, onSaved }: Props) {
           {localError && <p className="form-error" id={errorId}>{localError}</p>}
           <div className="modal-actions">
             {isEdit && (
-              <button type="button" className="btn btn-danger" onClick={() => void handleDelete()} disabled={saving}>
-                Delete
-              </button>
+              confirmDelete ? (
+                <span className="delete-confirm">
+                  Delete this task?
+                  <button type="button" className="btn btn-danger" onClick={() => void handleDelete()} disabled={saving}>
+                    Delete
+                  </button>
+                  <button type="button" className="btn btn-ghost" onClick={() => setConfirmDelete(false)} disabled={saving}>
+                    Keep
+                  </button>
+                </span>
+              ) : (
+                <button type="button" className="btn btn-danger" onClick={() => void handleDelete()} disabled={saving}>
+                  Delete
+                </button>
+              )
             )}
             <span className="spacer" />
             <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
               Cancel
             </button>
             <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? 'Saving…' : 'Save'}
+              {saving ? 'Saving…' : isEdit ? 'Save' : 'Create'}
             </button>
           </div>
         </form>

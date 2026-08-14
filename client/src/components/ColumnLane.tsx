@@ -1,17 +1,26 @@
 import { useDroppable } from '@dnd-kit/core';
 import type { Column, Task } from '../types';
+import { PlusIcon } from './Icons';
 import TaskCard from './TaskCard';
 
 type Tone = 'todo' | 'doing' | 'done';
 
+const EMPTY: Record<Tone, string> = {
+  todo: 'Nothing queued yet. Add one below.',
+  doing: 'Drag a task here when you start.',
+  done: 'Completed tasks land here.',
+};
+
 type Props = {
   column: Column;
   tone: Tone;
+  filtered: boolean;
   onAdd: (columnId: number) => void;
   onEdit: (task: Task) => void;
+  onClearFilters: () => void;
 };
 
-export default function ColumnLane({ column, tone, onAdd, onEdit }: Props) {
+export default function ColumnLane({ column, tone, filtered, onAdd, onEdit, onClearFilters }: Props) {
   const { setNodeRef, isOver } = useDroppable({
     id: `column-${column.id}`,
     data: { columnId: column.id },
@@ -19,7 +28,6 @@ export default function ColumnLane({ column, tone, onAdd, onEdit }: Props) {
 
   return (
     <section
-      ref={setNodeRef}
       className={`column column-tone-${tone} ${isOver ? 'column-over' : ''}`}
       aria-label={`${column.name}, ${column.task_count} tasks`}
     >
@@ -34,9 +42,20 @@ export default function ColumnLane({ column, tone, onAdd, onEdit }: Props) {
             : `${column.tasks.length}/${column.task_count}`}
         </span>
       </header>
-      <div className="column-body">
+      <div ref={setNodeRef} className="column-body">
         {column.tasks.length === 0 ? (
-          <p className="empty">Drop a task here, or add one below.</p>
+          <p className="empty">
+            {filtered ? (
+              <>
+                No matching tasks.{' '}
+                <button type="button" className="empty-clear" onClick={onClearFilters}>
+                  Clear filters
+                </button>
+              </>
+            ) : (
+              EMPTY[tone]
+            )}
+          </p>
         ) : (
           column.tasks.map((task) => (
             <TaskCard key={task.id} task={task} onEdit={onEdit} />
@@ -44,7 +63,8 @@ export default function ColumnLane({ column, tone, onAdd, onEdit }: Props) {
         )}
       </div>
       <button type="button" className="add-task" onClick={() => onAdd(column.id)}>
-        + Add task
+        <PlusIcon size={12} />
+        Add task
       </button>
     </section>
   );

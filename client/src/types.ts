@@ -28,4 +28,9 @@ export type Board = {
 };
 
 export const PRIORITIES: Priority[] = ['Low', 'Medium', 'High'];
-export const DEFAULT_BOARD_ID = 1;
+
+export type AuthUser = {
+  id: number;
+  email: string;
+  board_id: number | null;
+};

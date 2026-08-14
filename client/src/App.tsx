@@ -1,30 +1,42 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
   PointerSensor,
   closestCorners,
+  pointerWithin,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import { fetchBoard, moveTask } from './api';
-import { DEFAULT_BOARD_ID, type Board, type Priority, type Task } from './types';
+import { fetchBoard, fetchMe, logout, moveTask, setUnauthorizedHandler } from './api';
+import { type AuthUser, type Board, type Priority, type Task } from './types';
+import AuthScreen from './components/AuthScreen';
 import BoardView from './components/BoardView';
 import ErrorBanner from './components/ErrorBanner';
+import SiteFooter from './components/SiteFooter';
+import SiteHeader from './components/SiteHeader';
 import TaskCard from './components/TaskCard';
 import TaskModal from './components/TaskModal';
 import Toolbar from './components/Toolbar';
 
 const SEARCH_DELAY_MS = 250;
 
+const collisionDetection: CollisionDetection = (args) => {
+  const pointerHits = pointerWithin(args);
+  return pointerHits.length > 0 ? pointerHits : closestCorners(args);
+};
+
 type ModalState =
   | { mode: 'create'; columnId: number }
   | { mode: 'edit'; task: Task };
 
 export default function App() {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
   const [board, setBoard] = useState<Board | null>(null);
   const [priority, setPriority] = useState<Priority | 'all'>('all');
   const [search, setSearch] = useState('');
@@ -33,35 +45,72 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
+  const loadIdRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const ignoreClicksUntilRef = useRef(0);
+  const movingRef = useRef(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(search), SEARCH_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  const loadBoard = useCallback(async (signal?: AbortSignal) => {
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setUser(null);
+      setBoard(null);
+    });
+    void fetchMe()
+      .then((current) => setUser(current))
+      .catch(() => setUser(null))
+      .finally(() => setSessionReady(true));
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
+  const loadBoard = useCallback(async () => {
+    if (!user?.board_id) return;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const loadId = ++loadIdRef.current;
     try {
       const data = await fetchBoard(
-        DEFAULT_BOARD_ID,
+        user.board_id,
         { priority, q: debouncedSearch },
-        signal
+        controller.signal
       );
+      if (loadId !== loadIdRef.current) return;
       setBoard(data);
       setError(null);
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') return;
+      if (loadId !== loadIdRef.current) return;
+      if (controller.signal.aborted) return;
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError('Request timed out. Please try again.');
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Could not load the board');
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (loadId === loadIdRef.current) setLoading(false);
     }
-  }, [priority, debouncedSearch]);
+  }, [user, priority, debouncedSearch]);
 
   useEffect(() => {
-    const controller = new AbortController();
+    if (!user) {
+      setBoard(null);
+      setLoading(false);
+      return;
+    }
+    if (!user.board_id) {
+      setBoard(null);
+      setLoading(false);
+      setError('Your board could not be created. Sign out and try again.');
+      return;
+    }
     setLoading(true);
-    void loadBoard(controller.signal);
-    return () => controller.abort();
-  }, [loadBoard]);
+    void loadBoard();
+    return () => abortRef.current?.abort();
+  }, [loadBoard, user]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -81,57 +130,154 @@ export default function App() {
     setActiveTask(fromData ?? tasksById.get(Number(event.active.id)) ?? null);
   }
 
+  function ignoreTrailingClick() {
+    ignoreClicksUntilRef.current = Date.now() + 200;
+  }
+
+  function ifNotAfterDrag(action: () => void) {
+    if (Date.now() < ignoreClicksUntilRef.current) return;
+    action();
+  }
+
   async function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     setActiveTask(null);
-    if (!over || !board) return;
+    ignoreTrailingClick();
+    if (!over || movingRef.current) return;
 
     const taskId = Number(active.id);
-    const task = tasksById.get(taskId);
-    const targetColumnId = Number(over.data.current?.columnId);
-    if (!task || !targetColumnId || task.column_id === targetColumnId) return;
+    const fromDrag = active.data.current?.task as Task | undefined;
+    const task = fromDrag ?? tasksById.get(taskId);
+    const rawColumnId = over.data.current?.columnId;
+    const targetColumnId = typeof rawColumnId === 'number' ? rawColumnId : Number(rawColumnId);
+    if (!task || !Number.isInteger(taskId) || taskId < 1) return;
+    if (!Number.isInteger(targetColumnId) || targetColumnId < 1) return;
+    if (task.column_id === targetColumnId) return;
 
-    const previous = board;
-    setBoard(optimisticMove(board, taskId, targetColumnId));
+    movingRef.current = true;
+    const generation = loadIdRef.current;
+    let previous: Board | null = null;
+    setBoard((current) => {
+      previous = current;
+      return current ? optimisticMove(current, taskId, targetColumnId) : current;
+    });
 
     try {
       await moveTask(taskId, targetColumnId);
       await loadBoard();
     } catch (err) {
-      setBoard(previous);
+      if (loadIdRef.current === generation && previous) setBoard(previous);
       setError(err instanceof Error ? err.message : 'Could not move the task');
+    } finally {
+      movingRef.current = false;
     }
   }
 
-  const visibleCount = board?.columns.reduce((sum, col) => sum + col.tasks.length, 0) ?? 0;
   const filtered = priority !== 'all' || Boolean(debouncedSearch);
+  const visibleCount = board?.columns.reduce((sum, column) => sum + column.tasks.length, 0) ?? 0;
+
+  function clearFilters() {
+    setPriority('all');
+    setSearch('');
+  }
+
+  const firstColumnId = board?.columns[0]?.id;
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== 'c' && event.key !== 'C') return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (modal || firstColumnId == null) return;
+      event.preventDefault();
+      setModal({ mode: 'create', columnId: firstColumnId });
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [modal, firstColumnId]);
+
+  async function handleLogout() {
+    try {
+      await logout();
+    } catch {
+      /* cookie is cleared server-side even if this fails */
+    }
+    setUser(null);
+    setBoard(null);
+    setError(null);
+    setModal(null);
+    setSearch('');
+    setPriority('all');
+  }
+
+  if (!sessionReady) {
+    return (
+      <div className="app">
+        <header className="site-header">
+          <div className="site-header-inner">
+            <span className="brand">
+              <span className="brand-name">TaskFlow</span>
+            </span>
+          </div>
+        </header>
+        <main className="board-wrap">
+          <BoardSkeleton />
+        </main>
+        <SiteFooter />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <AuthScreen
+        onAuthed={(next) => {
+          setUser(next);
+          setError(null);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
-          <div>
-            <p className="brand-kicker">TaskFlow</p>
-            <h1>{board?.name ?? 'Board'}</h1>
-          </div>
-        </div>
-      </header>
+      <SiteHeader
+        search={search}
+        onSearchChange={setSearch}
+        email={user.email}
+        onLogout={() => void handleLogout()}
+        onNewTask={
+          firstColumnId != null
+            ? () => setModal({ mode: 'create', columnId: firstColumnId })
+            : undefined
+        }
+      />
 
       <div className="viewbar">
         <Toolbar
           priority={priority}
-          search={search}
           onPriorityChange={setPriority}
-          onSearchChange={setSearch}
+          filtered={filtered}
+          onClearFilters={clearFilters}
         />
-        <p className="result-meta">
-          {board
-            ? filtered
-              ? `${visibleCount} matching task${visibleCount === 1 ? '' : 's'}`
-              : `${visibleCount} tasks`
-            : ' '}
-        </p>
+        {loading && board ? (
+          <p className="result-meta" aria-live="polite">Updating…</p>
+        ) : filtered && board ? (
+          <p className="result-meta" aria-live="polite">
+            {visibleCount === 1 ? '1 task matches' : `${visibleCount} tasks match`}
+            {priority !== 'all' ? ` · ${priority}` : ''}
+            {debouncedSearch.trim() ? ` · “${debouncedSearch.trim()}”` : ''}
+          </p>
+        ) : null}
       </div>
 
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} onRetry={() => void loadBoard()} />}
@@ -142,15 +288,20 @@ export default function App() {
         ) : board ? (
           <DndContext
             sensors={sensors}
-            collisionDetection={closestCorners}
+            collisionDetection={collisionDetection}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
-            onDragCancel={() => setActiveTask(null)}
+            onDragCancel={() => {
+              setActiveTask(null);
+              ignoreTrailingClick();
+            }}
           >
             <BoardView
               columns={board.columns}
-              onAdd={(columnId) => setModal({ mode: 'create', columnId })}
-              onEdit={(task) => setModal({ mode: 'edit', task })}
+              filtered={filtered}
+              onAdd={(columnId) => ifNotAfterDrag(() => setModal({ mode: 'create', columnId }))}
+              onEdit={(task) => ifNotAfterDrag(() => setModal({ mode: 'edit', task }))}
+              onClearFilters={clearFilters}
             />
             <DragOverlay dropAnimation={null}>
               {activeTask ? <TaskCard task={activeTask} onEdit={() => undefined} overlay /> : null}
@@ -160,6 +311,8 @@ export default function App() {
           <p className="status">The board could not be loaded.</p>
         )}
       </main>
+
+      <SiteFooter />
 
       {modal && board && (
         <TaskModal
